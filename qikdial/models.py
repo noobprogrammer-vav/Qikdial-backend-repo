@@ -32,7 +32,7 @@ class UserModel(AbstractBaseUser):
     name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
     photo = models.ImageField(upload_to='qikdial/uploads/profile')
-    phone = models.CharField(max_length=100)
+    phone = models.CharField(max_length=100) #""
     city = models.CharField(max_length=100)
     is_merchant = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
@@ -67,7 +67,7 @@ class CategoryModel(models.Model):
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True)
     name = models.CharField(max_length=100)
     parent_name = models.CharField(max_length=100, blank=True, null=True)
-    image = models.ImageField(upload_to='qikdial/uploads/categories', null=True)
+    image = models.ImageField(upload_to='qikdial/uploads/categories', null=True) #""
     status = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -110,7 +110,7 @@ class ListingModel(models.Model):
 
 class ImageModel(models.Model):
     listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='qikdial/uploads/listings')
+    image = models.ImageField(upload_to='qikdial/uploads/listings') #""
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -119,7 +119,7 @@ class ImageModel(models.Model):
 
 class AmenityModel(models.Model):
     name = models.CharField(max_length=100, unique=True)
-    image = models.ImageField(upload_to="qikdial/uploads/amenities")
+    image = models.ImageField(upload_to="qikdial/uploads/amenities") #""
     status = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)   
@@ -190,7 +190,7 @@ class BlogModel(models.Model):
     summary = models.TextField(default=None)
     description = models.TextField()
     image = models.ImageField(upload_to="qikdial/uploads/blogs")
-    views = models.IntegerField(default=0) 
+    views = models.IntegerField(default=0)  #""
     status = models.IntegerField(default=1)   
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
