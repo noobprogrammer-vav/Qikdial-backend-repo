@@ -83,6 +83,8 @@ urlpatterns = [
 # ==========================================================Dashboard and Filter==========================================================
 
     path("dashboard", Dashboard.as_view()),
-    path("filter",Filter.as_view())
-    
+    path("filter",Filter.as_view()),
+    path('newFilter/',new_filter),
+
+    path("homepage", homepage)
 ]

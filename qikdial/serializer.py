@@ -131,7 +131,7 @@ class OfferGetSerializer(serializers.ModelSerializer):
 class EnquirySerializer(serializers.ModelSerializer):
     class Meta:
         model = EnquiryModel
-        fields = ["listing", "user"]
+        fields = ["listing", "user", "name", "email", "mobile", "message"]
 
 # ============================================================Contact us============================================================
 

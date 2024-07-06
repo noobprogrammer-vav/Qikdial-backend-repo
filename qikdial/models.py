@@ -63,11 +63,12 @@ class TokenModel(models.Model):
     def __str__(self) -> str:
         return self.user.name
 
-class CategoryModel(models.Model):
+class   CategoryModel(models.Model):
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True)
     name = models.CharField(max_length=100)
     parent_name = models.CharField(max_length=100, blank=True, null=True)
     image = models.ImageField(upload_to='qikdial/uploads/categories', null=True) #""
+    # cover_image = models.ImageField(upload_to='qikdial/uploads/categories/cover', )
     status = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -99,7 +100,7 @@ class ListingModel(models.Model):
     color = models.CharField(max_length=100,blank=True, null=True)
     delivery_duration = models.CharField(max_length=100 ,blank=True, null=True)
     refund = models.TextField(blank=True, null=True)
-    mode_of_service  = models.CharField(max_length=100,default="1",blank=True, null=True)
+    mode_of_service  = models.CharField(max_length=100,default="1",blank=True, null=True) #1,2 online, offline
     verified = models.IntegerField(default=0)
     status = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -179,6 +180,10 @@ class ListingViewsModel(models.Model):
 class EnquiryModel(models.Model):
     listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
     user = models.ForeignKey(UserModel, on_delete=models.CASCADE)
+    name = models.CharField(max_length=100, default=None, null=True)
+    email = models.EmailField(max_length=254, default=None, null=True)
+    mobile = models.CharField(max_length=100, default=None, null=True)
+    message = models.TextField(default=None, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __int__(self) -> int:
@@ -211,11 +216,11 @@ class CommentModel(models.Model):
         return self.subject
 
 class ContactsModel(models.Model):
-    name = models.CharField(max_length=100)
-    email = models.CharField(max_length=100)   
-    mobile = models.CharField(max_length=100)   
-    subject = models.CharField(max_length=255)   
-    message = models.TextField()   
+    name = models.CharField(max_length=100, null=True, default=None)
+    email = models.CharField(max_length=100, unique=True)   
+    mobile = models.CharField(max_length=100, null=True, default=None)   
+    subject = models.CharField(max_length=255, null=True, default=None)   
+    message = models.TextField(null=True, default=None)   
     created_at = models.DateTimeField(auto_now_add=True)
 
 

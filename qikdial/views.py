@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, action
 from rest_framework import status
 
+from django.forms.models import model_to_dict
 from django.contrib.auth import authenticate, login, logout 
 
 from django.contrib.sessions.models import Session
@@ -13,7 +14,7 @@ from django.db.models import Q
 from .models import *
 from .serializer import *
 
-import jwt 
+import jwt, random
 import datetime
 from dotenv import load_dotenv
 import os
@@ -27,6 +28,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 
 @api_view(["GET"])   
 def Tester(request):
+    print(request.META.get("HTTP_COOKIE"))
     return Response({"Message" : "Working"})
 
 def token_generator(id):
@@ -49,7 +51,7 @@ def Loginer(request):
         else:
             toke = TokenModel(user=user, token = token)
             toke.save()
-        return Response({"logged" : "Success", "merchant" : user.is_merchant, "admin" : user.is_staff, "token" : token}, status=status.HTTP_201_CREATED)
+        return Response({"logged" : "Success", "merchant" : user.is_merchant, "admin" : user.is_staff, "token" : token}, headers={"Set-Cookie" : f'my_token={token}'}, status=status.HTTP_201_CREATED)
     
 @api_view(["POST"])
 def Logouter(request):
@@ -329,130 +331,35 @@ class ListingView(APIView):
                     return Response({"Message" : "Listing not added"},status=status.HTTP_400_BAD_REQUEST)        
 
     def get(self,request):
+            
+        all_listings = ListingModel.objects.all()
 
-        if(request.query_params.get("status") != None):
-            all_vals = ImageModel.objects.values('listing').annotate(image_id=Min('id'))
-            values = []
+        listings = []
+        for listing in all_listings:
+            total_views = ListingViewsModel.objects.filter(listing = listing.pk).aggregate(total_count = Sum("count"))
+            total_ratings = RatingModel.objects.filter(listing = listing.pk)
+            avg_rating =total_ratings.aggregate(avg_rating = Avg("rating"))
+            total_comments = len(ListingViewsModel.objects.filter(listing = listing.pk).values())
 
-            for i in all_vals:
-                amenity_vals = []
-                city_vals = []
-                offer_vals = []
-                enquiry_vals = []
+            listi = model_to_dict(listing)
+            the_image = ImageModel.objects.filter(listing = listing.pk).values()[0] if ImageModel.objects.filter(listing = listing.pk).exists() else ''
+            listi.update({
+                "category_id" : { "id" : listing.category.pk, "name" : listing.category.name},
+                "image" : the_image,
+                "amenities" : list(ListingAmenityModel.objects.filter(listing = listing.pk).values()),
+                "cities" : list(CityListingModel.objects.filter(listing = listing.pk).values()),
+                "enquiries" : list(EnquiryModel.objects.filter(listing = listing.pk).values()),
+                "offers" : list(OfferModel.objects.filter(listing = listing.pk).values()),
+                "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
+                "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
+                "total_ratings" : len(total_ratings),
+                "total_comments" : 0 if total_comments is None else total_comments
+                
+            })
 
-                listing_val = ListingModel.objects.filter(pk=i["listing"]).values()[0]
-                if(listing_val["status"] == 1 ):
-                    image_val = ImageModel.objects.filter(pk=i["image_id"]).values()[0]
-
-                    total_views = ListingViewsModel.objects.filter(listing = i["listing"]).aggregate(total_count = Sum("count"))
-                    avg_rating = RatingModel.objects.filter(listing = i["listing"]).aggregate(avg_rating = Avg("rating"))
-                    total_comments = len(RatingModel.objects.filter(listing = i["listing"]).values())
-                    all_offers = OfferModel.objects.filter(listing = i["listing"])
-                    all_enquiries = EnquiryModel.objects.filter(listing = i["listing"])
-
-                    for enquiry in all_enquiries:
-                        enquiry_vals.append({
-                            "id" : enquiry.user.pk,
-                            "name" : enquiry.user.name,
-                            "mobile" : enquiry.user.phone,
-                        })
-
-                    for offer in all_offers:
-                        offer_vals.append({
-                            "id" : offer.pk,
-                            "offer" : offer.offer,
-                            "description" : offer.description,
-                            "status" : offer.status
-                        })
-
-                    all_amenities = ListingAmenityModel.objects.filter(listing = i["listing"]).select_related("amenity").values("amenity__name","amenity__id")
-                    for amenity in all_amenities:
-                        amenity_vals.append({"name" : amenity["amenity__name"], "id" : amenity["amenity__id"]})
-
-                    all_cities = CityListingModel.objects.filter(listing = i["listing"]).select_related("city").values("city__name","city__id")
-                    for city in all_cities:
-                        city_vals.append({"name" : city["city__name"], "id" : city["city__id"]})
-                    
-                    listing_val.update({
-                        "category_id" : {
-                            "id" : CategoryModel.objects.get(pk=listing_val["category_id"]).pk, 
-                            "name" : CategoryModel.objects.get(pk=listing_val["category_id"]).name
-                            }, 
-                        "image" : image_val, 
-                        "amenities" : amenity_vals, 
-                        "cities" : city_vals,
-                        "enquiries" : enquiry_vals,
-                        "offers" : offer_vals,
-                        "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
-                        "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
-                        "total_ratings" : len(RatingModel.objects.filter(listing = listing_val["id"]).values()),
-                        "total_comments" : 0 if total_comments is None else total_comments ,
-                        })
-                    
-                    values.append(listing_val)
+            listings.append(listi)
         
-        else:
-            all_vals = ImageModel.objects.values('listing').annotate(image_id=Min('id'))
-            values = []
-
-            for i in all_vals:
-                amenity_vals = []
-                city_vals = []
-                offer_vals = []
-                enquiry_vals = []
-
-                listing_val = ListingModel.objects.filter(pk=i["listing"]).values()[0]
-                if(True):
-                    image_val = ImageModel.objects.filter(pk=i["image_id"]).values()[0]
-
-                    total_views = ListingViewsModel.objects.filter(listing = i["listing"]).aggregate(total_count = Sum("count"))
-                    avg_rating = RatingModel.objects.filter(listing = i["listing"]).aggregate(avg_rating = Avg("rating"))
-                    total_comments = len(ListingViewsModel.objects.filter(listing = i["listing"]).values())
-                    all_offers = OfferModel.objects.filter(listing = i["listing"])
-                    all_enquiries = EnquiryModel.objects.filter(listing = i["listing"])
-
-                    for enquiry in all_enquiries:
-                        enquiry_vals.append({
-                            "id" : enquiry.user.pk,
-                            "name" : enquiry.user.name,
-                            "mobile" : enquiry.user.phone,
-                        })
-
-                    for offer in all_offers:
-                        offer_vals.append({
-                            "id" : offer.pk,
-                            "offer" : offer.offer,
-                            "description" : offer.description,
-                            "status" : offer.status
-                        })
-
-
-                    all_amenities = ListingAmenityModel.objects.filter(listing = i["listing"]).select_related("amenity").values("amenity__name","amenity__id")
-                    for amenity in all_amenities:
-                        amenity_vals.append({"name" : amenity["amenity__name"], "id" : amenity["amenity__id"]})
-
-                    all_cities = CityListingModel.objects.filter(listing = i["listing"]).select_related("city").values("city__name","city__id")
-                    for city in all_cities:
-                        city_vals.append({"name" : city["city__name"], "id" : city["city__id"]})
-                    
-                    listing_val.update({
-                        "category_id" : {
-                            "id" : CategoryModel.objects.get(pk=listing_val["category_id"]).pk, 
-                            "name" : CategoryModel.objects.get(pk=listing_val["category_id"]).name
-                            }, 
-                        "image" : image_val, 
-                        "amenities" : amenity_vals, 
-                        "cities" : city_vals,
-                        "enquiries" : enquiry_vals,
-                        "offers" : offer_vals,
-                        "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
-                        "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
-                        "total_ratings" : len(RatingModel.objects.filter(listing = listing_val["id"]).values()),
-                        "total_comments" : 0 if total_comments is None else total_comments ,
-                        })
-                    
-                    values.append(listing_val)
-        return Response({"Message" : "OK","data" : values})
+        return Response({"Message" : "OK","data" : {"categories" : CategoryModel.objects.all().values_list("id", "name"), "listings" : listings, "cities" : CityModel.objects.all().values_list("id", "name")}})
 
     def delete(self,request):
         val = ListingModel.objects.get(pk=request.query_params.get("id"))
@@ -539,8 +446,8 @@ def ListingGetSpecific(request):
         },
         "user_id" : {
             "id" : all_vals["user_id"],
-            "name" : UserModel.objects.get(pk = all_vals["user_id"]).name,
-            "mobile" : UserModel.objects.get(pk = all_vals["user_id"]).phone,
+            "name" : UserModel.objects.filter(pk = all_vals["user_id"]).first().name if UserModel.objects.filter(pk = all_vals["user_id"]).exists() else None,
+            "mobile" : UserModel.objects.filter(pk = all_vals["user_id"]).first().phone if UserModel.objects.filter(pk = all_vals["user_id"]).exists() else None,
 
         },
         "images" : image_vals,
@@ -548,9 +455,12 @@ def ListingGetSpecific(request):
         "cities" : city_vals,
         "ratings" : rating_vals,
         "avg_rating" : avg_rating,
+        "ratings_split" : [len(all_ratings), len(all_ratings.filter(rating = 1)), len(all_ratings.filter(rating = 2)), len(all_ratings.filter(rating = 3)), len(all_ratings.filter(rating = 4)), len(all_ratings.filter(rating = 5))],
         "enquiries" : enquiry_vals,
         "offers" : offer_vals,
-        "total_views" : 0 if total_views["total_view"] is None else total_views["total_view"]
+        "total_views" : 0 if total_views["total_view"] is None else total_views["total_view"],
+        "categories" : CategoryModel.objects.all().values(),
+        "favorites_count" : len(FavoriteModel.objects.filter(listing = request.query_params.get("id")))
 
     })
 
@@ -1361,8 +1271,6 @@ class Dashboard(APIView):
 #     def put(self,request): #forSearch
 #         pass
 
-
-
 class Filter(APIView):
     def post(self, request):
         city_val = request.data.get("city")
@@ -1409,3 +1317,127 @@ class Filter(APIView):
 
         # Return the response with consistent data structure
         return Response({"Message": "OK", "data": list(listings)})
+
+# modi
+@api_view(["GET"])
+def homepage(request):
+    categories = CategoryModel.objects.filter(status=1).annotate(total_listings=Count('listingmodel')).values()
+
+    category_ids = []
+
+    for category in categories:
+        category_ids.append({"id" : category['id'], "name" : category["name"]})
+
+    if len(category_ids) >= 4:
+        random_categories = random.sample(category_ids, len(category_ids))
+    else:
+        random_categories = category_ids
+
+    all_data = {}
+
+    for category in random_categories:
+        all_listings = ListingModel.objects.filter(category = category["id"])
+
+        all_cat_lists = []
+
+        for listing in all_listings:
+
+            total_views = ListingViewsModel.objects.filter(listing = listing.pk).aggregate(total_count = Sum("count"))
+            total_ratings = RatingModel.objects.filter(listing = listing.pk)
+            avg_rating =total_ratings.aggregate(avg_rating = Avg("rating"))
+            total_comments = len(ListingViewsModel.objects.filter(listing = listing.pk).values())
+
+            listi = model_to_dict(listing)
+            the_image = ImageModel.objects.filter(listing = listing.pk).values()[0] if ImageModel.objects.filter(listing = listing.pk).exists() else ''
+            listi.update({
+                "category_id" : { "id" : listing.category.pk, "name" : listing.category.name},
+                "image" : the_image,
+                "amenities" : list(ListingAmenityModel.objects.filter(listing = listing.pk).values()),
+                "cities" : list(CityListingModel.objects.filter(listing = listing.pk).values()),
+                "enquiries" : list(EnquiryModel.objects.filter(listing = listing.pk).values()),
+                "offers" : list(OfferModel.objects.filter(listing = listing.pk).values()),
+                "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
+                "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
+                "total_ratings" : len(total_ratings),
+                "total_comments" : 0 if total_comments is None else total_comments
+                
+            })
+
+            all_cat_lists.append(listi)
+            
+        all_data.update({category["name"] : all_cat_lists})
+
+    return Response({"message" : "success", "data" : {
+        "categories" : list(categories),
+        "listings" : all_data,
+        "cities" : CityModel.objects.all().values_list("id", "name")
+    }})
+
+@api_view(['POST'])
+def new_filter(request):
+    data = request.data
+
+    all_listings = ListingModel.objects.all()
+
+    if(len(data.get("cities")) != 0):
+        # all_city_listings = CityListingModel.objects.filter(city__in = data.get("cities")).values_list("listing", flat=True)
+        all_listings = all_listings.filter(citylistingmodel__city__in = data.get("cities"))
+        available_listings = ListingModel.objects.filter(availability = 1)
+
+        all_listings = all_listings | available_listings
+    
+    if(len(data.get("categories")) != 0):
+        all_listings = all_listings.filter(category__in = data.get("categories"))
+    
+    if(len(data.get("listingTypes")) != 0):
+        all_listings = all_listings.filter(listing_type__in = data.get("listingTypes"))
+    
+    if(int(data.get('mos')) != -1):
+        all_listings = all_listings.filter(mode_of_service = int(data.get('mos')))
+    
+    if(data.get("text") != ''):
+        all_listings = all_listings.filter(name__icontains = data.get("text"))
+
+    if(data.get("sort_order") != '0'):
+        if(data.get("sort_order") == 'latest'):
+            all_listings = all_listings.order_by('-created_at')
+        if(data.get("sort_order") == 'verified'):
+            all_listings = all_listings.order_by('-verified')
+
+
+    listings = []
+        
+    for listing in all_listings:
+
+        total_views = ListingViewsModel.objects.filter(listing = listing.pk).aggregate(total_count = Sum("count"))
+        total_ratings = RatingModel.objects.filter(listing = listing.pk)
+        avg_rating =total_ratings.aggregate(avg_rating = Avg("rating"))
+        total_comments = len(ListingViewsModel.objects.filter(listing = listing.pk).values())
+
+        listi = model_to_dict(listing)
+        the_image = ImageModel.objects.filter(listing = listing.pk).values()[0] if ImageModel.objects.filter(listing = listing.pk).exists() else ''
+        listi.update({
+            "category_id" : { "id" : listing.category.pk, "name" : listing.category.name},
+            "image" : the_image,
+            "amenities" : list(ListingAmenityModel.objects.filter(listing = listing.pk).values_list("amenity__id", "amenity__name")),
+            "cities" : list(CityListingModel.objects.filter(listing = listing.pk).values_list("city__id", "city__name")),
+            "enquiries" : list(EnquiryModel.objects.filter(listing = listing.pk).values()),
+            "offers" : list(OfferModel.objects.filter(listing = listing.pk).values()),
+            "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
+            "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
+            "total_ratings" : len(total_ratings),
+            "total_comments" : 0 if total_comments is None else total_comments   
+        })
+
+        listings.append(listi)
+
+    if(data.get("sort_order") != '0'):
+        if(data.get("sort_order") == 'popular'):
+            listings = sorted(listings, key=lambda x : x['views'])
+        if(data.get("sort_order") == 'high'):
+            listings = sorted(listings, key=lambda x : x['avg_rating'], reverse=True)
+        if(data.get("sort_order") == 'low'):
+            listings = sorted(listings, key=lambda x : x['avg_rating'])
+
+    
+    return Response({"message" : "success", "data" : listings})
