@@ -4,8 +4,8 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, action
 from rest_framework import status
 
-from django.forms.models import model_to_dict
 from django.contrib.auth import authenticate, login, logout 
+from django.forms.models import model_to_dict
 
 from django.contrib.sessions.models import Session
 from django.db.models import Max, Count, Min, Sum, Avg
@@ -28,7 +28,6 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 
 @api_view(["GET"])   
 def Tester(request):
-    # print(request.META.get("HTTP_COOKIE"))
     return Response({"Message" : "Working"})
 
 def token_generator(id):
@@ -40,7 +39,7 @@ def token_generator(id):
 def Loginer(request):
     user = authenticate(email=request.data.get("email"), password=request.data.get("password"))
     if not user:
-        return Response({"logged" : "Fail"}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response({"logged" : "Fail", "user" : user}, status=status.HTTP_401_UNAUTHORIZED)
     else:
         login(request, user)
         token = token_generator(user.pk)
@@ -51,18 +50,17 @@ def Loginer(request):
         else:
             toke = TokenModel(user=user, token = token)
             toke.save()
-        return Response({"logged" : "Success", "merchant" : user.is_merchant, "admin" : user.is_staff, "token" : token}, headers={"Set-Cookie" : f'my_token={token}'}, status=status.HTTP_201_CREATED)
+        return Response({"logged" : "Success", "merchant" : user.is_merchant, "admin" : user.is_staff, "token" : token}, status=status.HTTP_201_CREATED)
     
 @api_view(["POST"])
 def Logouter(request):
     logout(request)
-    TokenModel.objects.filter(token = request.data.get("token")).first().delete()
     return Response({"Message" : "OK"}, status=status.HTTP_200_OK)
 
 @api_view(["POST"])
 def token_checker(request):
-    token = request.data.get("token")
     try:
+        token = request.data.get("token")
         user_data = jwt.decode(token, SECRET_KEY, algorithms="HS256")
     except:
         return Response({"Message" : "Invalid Token"},status=status.HTTP_401_UNAUTHORIZED)
@@ -155,6 +153,7 @@ class CategoryView(APIView):
             serializer.save()
             return Response({"Message" : "OK"}, status=status.HTTP_201_CREATED)
         else:
+            print(serializer.errors)
             return Response({"Message" : "Failed"}, status=status.HTTP_400_BAD_REQUEST)
     
     def delete(self,request):
@@ -272,9 +271,11 @@ class ListingView(APIView):
                         return Response({"Message" : "OK"}, status=status.HTTP_201_CREATED)
 
                     else:
+                        print(imageserialiser.errors)
                         return Response({"Message" : "Image not added"},status=status.HTTP_400_BAD_REQUEST)
 
                 else:
+                    print(serializer.errors)
                     return Response({"Message" : "Listing not added"},status=status.HTTP_400_BAD_REQUEST)
             
             elif(request.data.get("listing_type") == "2"):
@@ -304,6 +305,7 @@ class ListingView(APIView):
             else:
                 serializer = ListingBusinessPostSerializer(data = updated_data)
                 if serializer.is_valid():
+                    print("in")
                     listing = serializer.save()
                     updated_data.update({"listing" : listing.pk})
 
@@ -321,40 +323,137 @@ class ListingView(APIView):
                         return Response({"Message" : "OK"}, status=status.HTTP_201_CREATED)
 
                     else:
+                        print(imageserialiser.errors)
                         return Response({"Message" : "Image not added"},status=status.HTTP_400_BAD_REQUEST)
                 else:
+                    print(serializer.errors)
                     return Response({"Message" : "Listing not added"},status=status.HTTP_400_BAD_REQUEST)        
 
     def get(self,request):
-            
-        all_listings = ListingModel.objects.all()
 
-        listings = []
-        for listing in all_listings:
-            total_views = ListingViewsModel.objects.filter(listing = listing.pk).aggregate(total_count = Sum("count"))
-            total_ratings = RatingModel.objects.filter(listing = listing.pk)
-            avg_rating =total_ratings.aggregate(avg_rating = Avg("rating"))
-            total_comments = len(ListingViewsModel.objects.filter(listing = listing.pk).values())
+        if(request.query_params.get("status") != None):
+            all_vals = ImageModel.objects.values('listing').annotate(image_id=Min('id'))
+            values = []
 
-            listi = model_to_dict(listing)
-            the_image = ImageModel.objects.filter(listing = listing.pk).values()[0] if ImageModel.objects.filter(listing = listing.pk).exists() else ''
-            listi.update({
-                "category_id" : { "id" : listing.category.pk, "name" : listing.category.name},
-                "image" : the_image,
-                "amenities" : list(ListingAmenityModel.objects.filter(listing = listing.pk).values()),
-                "cities" : list(CityListingModel.objects.filter(listing = listing.pk).values()),
-                "enquiries" : list(EnquiryModel.objects.filter(listing = listing.pk).values()),
-                "offers" : list(OfferModel.objects.filter(listing = listing.pk).values()),
-                "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
-                "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
-                "total_ratings" : len(total_ratings),
-                "total_comments" : 0 if total_comments is None else total_comments
-                
-            })
+            for i in all_vals:
+                amenity_vals = []
+                city_vals = []
+                offer_vals = []
+                enquiry_vals = []
 
-            listings.append(listi)
+                listing_val = ListingModel.objects.filter(pk=i["listing"]).values()[0]
+                if(listing_val["status"] == 1 ):
+                    image_val = ImageModel.objects.filter(pk=i["image_id"]).values()[0]
+
+                    total_views = ListingViewsModel.objects.filter(listing = i["listing"]).aggregate(total_count = Sum("count"))
+                    avg_rating = RatingModel.objects.filter(listing = i["listing"]).aggregate(avg_rating = Avg("rating"))
+                    total_comments = len(RatingModel.objects.filter(listing = i["listing"]).values())
+                    all_offers = OfferModel.objects.filter(listing = i["listing"])
+                    all_enquiries = EnquiryModel.objects.filter(listing = i["listing"])
+
+                    for enquiry in all_enquiries:
+                        enquiry_vals.append({
+                            "id" : enquiry.user.pk,
+                            "name" : enquiry.user.name,
+                            "mobile" : enquiry.user.phone,
+                        })
+
+                    for offer in all_offers:
+                        offer_vals.append({
+                            "id" : offer.pk,
+                            "offer" : offer.offer,
+                            "description" : offer.description,
+                            "status" : offer.status
+                        })
+
+                    all_amenities = ListingAmenityModel.objects.filter(listing = i["listing"]).select_related("amenity").values("amenity__name","amenity__id")
+                    for amenity in all_amenities:
+                        amenity_vals.append({"name" : amenity["amenity__name"], "id" : amenity["amenity__id"]})
+
+                    all_cities = CityListingModel.objects.filter(listing = i["listing"]).select_related("city").values("city__name","city__id")
+                    for city in all_cities:
+                        city_vals.append({"name" : city["city__name"], "id" : city["city__id"]})
+                    
+                    listing_val.update({
+                        "category_id" : {
+                            "id" : CategoryModel.objects.get(pk=listing_val["category_id"]).pk, 
+                            "name" : CategoryModel.objects.get(pk=listing_val["category_id"]).name
+                            }, 
+                        "image" : image_val, 
+                        "amenities" : amenity_vals, 
+                        "cities" : city_vals,
+                        "enquiries" : enquiry_vals,
+                        "offers" : offer_vals,
+                        "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
+                        "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
+                        "total_ratings" : len(RatingModel.objects.filter(listing = listing_val["id"]).values()),
+                        "total_comments" : 0 if total_comments is None else total_comments ,
+                        })
+                    
+                    values.append(listing_val)
         
-        return Response({"Message" : "OK","data" : {"categories" : CategoryModel.objects.all().values_list("id", "name"), "listings" : listings, "cities" : CityModel.objects.all().values_list("id", "name")}})
+        else:
+            all_vals = ImageModel.objects.values('listing').annotate(image_id=Min('id'))
+            values = []
+
+            for i in all_vals:
+                amenity_vals = []
+                city_vals = []
+                offer_vals = []
+                enquiry_vals = []
+
+                listing_val = ListingModel.objects.filter(pk=i["listing"]).values()[0]
+                if(True):
+                    image_val = ImageModel.objects.filter(pk=i["image_id"]).values()[0]
+
+                    total_views = ListingViewsModel.objects.filter(listing = i["listing"]).aggregate(total_count = Sum("count"))
+                    avg_rating = RatingModel.objects.filter(listing = i["listing"]).aggregate(avg_rating = Avg("rating"))
+                    total_comments = len(ListingViewsModel.objects.filter(listing = i["listing"]).values())
+                    all_offers = OfferModel.objects.filter(listing = i["listing"])
+                    all_enquiries = EnquiryModel.objects.filter(listing = i["listing"])
+
+                    for enquiry in all_enquiries:
+                        enquiry_vals.append({
+                            "id" : enquiry.user.pk,
+                            "name" : enquiry.user.name,
+                            "mobile" : enquiry.user.phone,
+                        })
+
+                    for offer in all_offers:
+                        offer_vals.append({
+                            "id" : offer.pk,
+                            "offer" : offer.offer,
+                            "description" : offer.description,
+                            "status" : offer.status
+                        })
+
+
+                    all_amenities = ListingAmenityModel.objects.filter(listing = i["listing"]).select_related("amenity").values("amenity__name","amenity__id")
+                    for amenity in all_amenities:
+                        amenity_vals.append({"name" : amenity["amenity__name"], "id" : amenity["amenity__id"]})
+
+                    all_cities = CityListingModel.objects.filter(listing = i["listing"]).select_related("city").values("city__name","city__id")
+                    for city in all_cities:
+                        city_vals.append({"name" : city["city__name"], "id" : city["city__id"]})
+                    
+                    listing_val.update({
+                        "category_id" : {
+                            "id" : CategoryModel.objects.get(pk=listing_val["category_id"]).pk, 
+                            "name" : CategoryModel.objects.get(pk=listing_val["category_id"]).name
+                            }, 
+                        "image" : image_val, 
+                        "amenities" : amenity_vals, 
+                        "cities" : city_vals,
+                        "enquiries" : enquiry_vals,
+                        "offers" : offer_vals,
+                        "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
+                        "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
+                        "total_ratings" : len(RatingModel.objects.filter(listing = listing_val["id"]).values()),
+                        "total_comments" : 0 if total_comments is None else total_comments ,
+                        })
+                    
+                    values.append(listing_val)
+        return Response({"Message" : "OK","data" : values})
 
     def delete(self,request):
         val = ListingModel.objects.get(pk=request.query_params.get("id"))
@@ -367,15 +466,6 @@ class ListingView(APIView):
     
 @api_view(["GET"])
 def ListingGetSpecific(request):
-
-    the_favs = []
-    if(request.headers.get("Authorization") is not None):
-        token = request.headers.get("Authorization")
-        try:
-            user_data = jwt.decode(token, SECRET_KEY, algorithms="HS256")
-            the_favs.extend(FavoriteModel.objects.filter(user = user_data["id"]).values_list("listing", flat=True))
-        except:
-            pass
 
     if(request.query_params.get("id") == None):return Response({"Message" : "Listing Id Required"},status.HTTP_406_NOT_ACCEPTABLE)
 
@@ -450,8 +540,8 @@ def ListingGetSpecific(request):
         },
         "user_id" : {
             "id" : all_vals["user_id"],
-            "name" : UserModel.objects.filter(pk = all_vals["user_id"]).first().name if UserModel.objects.filter(pk = all_vals["user_id"]).exists() else None,
-            "mobile" : UserModel.objects.filter(pk = all_vals["user_id"]).first().phone if UserModel.objects.filter(pk = all_vals["user_id"]).exists() else None,
+            "name" : UserModel.objects.get(pk = all_vals["user_id"]).name,
+            "mobile" : UserModel.objects.get(pk = all_vals["user_id"]).phone,
 
         },
         "images" : image_vals,
@@ -459,13 +549,9 @@ def ListingGetSpecific(request):
         "cities" : city_vals,
         "ratings" : rating_vals,
         "avg_rating" : avg_rating,
-        "ratings_split" : [len(all_ratings), len(all_ratings.filter(rating = 1)), len(all_ratings.filter(rating = 2)), len(all_ratings.filter(rating = 3)), len(all_ratings.filter(rating = 4)), len(all_ratings.filter(rating = 5))],
         "enquiries" : enquiry_vals,
         "offers" : offer_vals,
-        "total_views" : 0 if total_views["total_view"] is None else total_views["total_view"],
-        "categories" : CategoryModel.objects.all().values(),
-        "favorites_count" : len(FavoriteModel.objects.filter(listing = request.query_params.get("id"))),
-        "is_fav" : all_vals["id"] in the_favs
+        "total_views" : 0 if total_views["total_view"] is None else total_views["total_view"]
 
     })
 
@@ -591,6 +677,7 @@ def ListingGetUserSpecific(request):
 # Listing Editors ========================================================
 @api_view(["POST"])
 def BasicInfoEditor(request):
+    print(type(request.data.get("availability")))
     listing = ListingModel.objects.get(pk = request.data.get("listing"))
     serializer = BasicInfoSerialiser(listing, data=request.data)
     if serializer.is_valid():
@@ -605,6 +692,7 @@ def BasicInfoEditor(request):
 
         return Response({"Message" : "Edited"},status=status.HTTP_200_OK)
     else:
+        print(serializer.errors)
         return Response({"Message" : "Failed"},status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -616,6 +704,7 @@ def OtherInfoEditor(request):
         serializer.save()
         return Response({"Message" : "Edited"},status=status.HTTP_200_OK)
     else:
+        print(serializer.errors)
         return Response({"Message" : "Failed"},status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -638,6 +727,7 @@ def AmenityInfoEditor(request):
     
     for amenity in amenity_id:
         if(amenity not in request.data.get("amenities")): #delete
+            print(listing_amenity_id[amenity_id.index(amenity)])
             ListingAmenityModel.objects.get(pk=listing_amenity_id[amenity_id.index(amenity)]).delete()
 
     return Response({"Message" : "OK"},status=status.HTTP_200_OK)
@@ -659,6 +749,7 @@ def CityInfoEditor(request):
     
     for city in city_id:
         if(city not in request.data.get("cities")): #delete
+            print(listing_city_id[city_id.index(city)])
             CityListingModel.objects.get(pk=listing_city_id[city_id.index(city)]).delete()
 
     return Response({"Message" : "OK"},status=status.HTTP_200_OK)
@@ -672,6 +763,7 @@ class ListingImageView(APIView):
             serializer.save()
             return Response({"Message" : "OK"},status=status.HTTP_200_OK)
         else:
+            print(serializer.errors)
             return Response({"Message" : "Error"},status=status.HTTP_400_BAD_REQUEST)
     
     def delete(self,request):
@@ -710,6 +802,7 @@ class RatingView(APIView):
                     serializer.save()
                     return Response({"Message" : "OK"},status=status.HTTP_201_CREATED)
                 else:
+                    print(serializer.errors)
                     return Response({"Message" : "Error"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(["POST"])
@@ -764,6 +857,7 @@ class ListingViewsView(APIView):
 class FavoritesView(APIView):
     def post(self,request):
         token = request.data.get("token")
+        print(token, request.data.get("listing"))
 
         try:
             user_data = jwt.decode(token, SECRET_KEY, algorithms="HS256")
@@ -791,35 +885,22 @@ def GetFavorites(request):
     except:
         return Response({"Message" : "Invalid Token"},status=status.HTTP_401_UNAUTHORIZED)
     else:
-        all_listings = ListingModel.objects.filter(favoritemodel__user = user_data["id"])
+        if(request.query_params.get("id") is not None):
+            val = FavoriteModel.objects.filter(user = user_data["id"], listing = request.query_params.get("id"))
+            if(len(val) > 0):
+                return Response({"Message" : "OK", "data" : 1})
+            else:
+                return Response({"Message" : "OK", "data" : 0})
+        else:
+            all_vals = []
+            vals = FavoriteModel.objects.filter(user = user_data["id"]).values()
+            for val in vals:
+                listing = ListingModel.objects.filter(pk=val["listing_id"]).values()[0]
+                image = ImageModel.objects.filter(listing = val["listing_id"]).values()[0]
+                val.update({"listing" : listing, "image" : image})
 
-        all_vals = []
-        for listing in all_listings:
-
-            total_views = ListingViewsModel.objects.filter(listing = listing.pk).aggregate(total_count = Sum("count"))
-            total_ratings = RatingModel.objects.filter(listing = listing.pk)
-            avg_rating =total_ratings.aggregate(avg_rating = Avg("rating"))
-            total_comments = len(ListingViewsModel.objects.filter(listing = listing.pk).values())
-
-            listi = model_to_dict(listing)
-            the_image = ImageModel.objects.filter(listing = listing.pk).values()[0] if ImageModel.objects.filter(listing = listing.pk).exists() else ''
-            listi.update({
-                "category_id" : { "id" : listing.category.pk, "name" : listing.category.name},
-                "image" : the_image,
-                "amenities" : list(ListingAmenityModel.objects.filter(listing = listing.pk).values()),
-                "cities" : list(CityListingModel.objects.filter(listing = listing.pk).values()),
-                "enquiries" : list(EnquiryModel.objects.filter(listing = listing.pk).values()),
-                "offers" : list(OfferModel.objects.filter(listing = listing.pk).values()),
-                "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
-                "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
-                "total_ratings" : len(total_ratings),
-                "total_comments" : 0 if total_comments is None else total_comments
-
-            })
-
-            all_vals.append(listi)
-          
-        return Response({"Message" : "OK", "data" : all_vals})
+                all_vals.append(val)
+            return Response({"Message" : "OK", "data" : all_vals})
 
 # ============================================================Blogs and Blog Comments============================================================
 
@@ -835,6 +916,7 @@ class BlogView(APIView):
             serialiser.save()
             return Response({"Message" : "Created"}, status=status.HTTP_201_CREATED)
         else:
+            print(serialiser.errors)
             return Response({"Message" : "Error"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def delete(self,request):
@@ -883,6 +965,7 @@ class BlogCommentsView(APIView):
             serializer.save()
             return Response({"Message" : "Created"}, status=status.HTTP_201_CREATED)
         else:
+            print(serializer.errors)
             return Response({"Message" : "Error"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # ============================================================Offers============================================================
@@ -915,6 +998,7 @@ class OffersView(APIView):
             serializer.save()
             return Response({"Message" : "Created"}, status=status.HTTP_201_CREATED)
         else:
+            print(serializer.errors)
             return Response({"Message" : "Error"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def delete(self,request):
@@ -961,11 +1045,13 @@ class EnquiryView(APIView):
             else:
                 updated_data = request.data.copy()
                 updated_data.update({"user" : user_data["id"]})
+                print(updated_data)
                 serializer = EnquirySerializer(data=updated_data)
                 if(serializer.is_valid()):
                     serializer.save()
                     return Response({"Message" : "Created"}, status=status.HTTP_201_CREATED)
                 else:
+                    print(serializer.errors)
                     return Response({"Message" : "Error"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(["POST"])
@@ -1000,6 +1086,7 @@ class ContactsView(APIView):
             serializer.save()
             return Response({"Message" : "Created"}, status=status.HTTP_201_CREATED)
         else:
+            print(serializer.errors)
             return Response({"Message" : "Error"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 # ============================================================User get============================================================
@@ -1275,6 +1362,8 @@ class Dashboard(APIView):
 #     def put(self,request): #forSearch
 #         pass
 
+
+
 class Filter(APIView):
     def post(self, request):
         city_val = request.data.get("city")
@@ -1282,6 +1371,7 @@ class Filter(APIView):
         type_val = request.data.get("type")
 
         # Print the received filter values
+        print(city_val, category_val, type_val)
 
         # Start with an empty Q object
         query = Q()
@@ -1321,137 +1411,580 @@ class Filter(APIView):
         # Return the response with consistent data structure
         return Response({"Message": "OK", "data": list(listings)})
 
-# modi
+
 @api_view(["GET"])
 def homepage(request):
-    try:
-        the_favs = []
-        if(request.headers.get("Authorization") is not None):
-            token = request.headers.get("Authorization")
-            try:
-                user_data = jwt.decode(token, SECRET_KEY, algorithms="HS256")
-                the_favs.extend(FavoriteModel.objects.filter(user = user_data["id"]).values_list("listing", flat=True))
-            except:
-                pass
+    categories = CategoryModel.objects.filter(status=1).annotate(total_listings=Count('listingmodel')).values()
 
-        categories = CategoryModel.objects.filter(status=1).annotate(total_listings=Count('listingmodel')).values()
-        category_ids = []
-        for category in categories:
-            category_ids.append({"id" : category['id'], "name" : category["name"]})
+    category_ids = []
 
-        if len(category_ids) >= 4:
-            random_categories = random.sample(category_ids, len(category_ids))
-        else:
-            random_categories = category_ids
+    for category in categories:
+        category_ids.append({"id" : category['id'], "name" : category["name"]})
 
-        all_data = {}
+    if len(category_ids) >= 4:
+        random_categories = random.sample(category_ids, len(category_ids))
+    else:
+        random_categories = category_ids
 
-        for category in random_categories:
-            all_listings = ListingModel.objects.filter(category = category["id"])
+    all_data = {}
 
-            all_cat_lists = []
+    for category in random_categories:
+        all_listings = ListingModel.objects.filter(category = category["id"])
 
-            for listing in all_listings:
+        all_cat_lists = []
 
-                total_views = ListingViewsModel.objects.filter(listing = listing.pk).aggregate(total_count = Sum("count"))
-                total_ratings = RatingModel.objects.filter(listing = listing.pk)
-                avg_rating =total_ratings.aggregate(avg_rating = Avg("rating"))
-                total_comments = len(ListingViewsModel.objects.filter(listing = listing.pk).values())
+        for listing in all_listings:
 
-                listi = model_to_dict(listing)
-                the_image = ImageModel.objects.filter(listing = listing.pk).values()[0] if ImageModel.objects.filter(listing = listing.pk).exists() else ''
-                listi.update({
-                    "category_id" : { "id" : listing.category.pk, "name" : listing.category.name},
-                    "image" : the_image,
-                    "amenities" : list(ListingAmenityModel.objects.filter(listing = listing.pk).values()),
-                    "cities" : list(CityListingModel.objects.filter(listing = listing.pk).values()),
-                    "enquiries" : list(EnquiryModel.objects.filter(listing = listing.pk).values()),
-                    "offers" : list(OfferModel.objects.filter(listing = listing.pk).values()),
-                    "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
-                    "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
-                    "total_ratings" : len(total_ratings),
-                    "total_comments" : 0 if total_comments is None else total_comments,
-                    "is_fav" : listing.pk in the_favs
-                    
-                })
+            total_views = ListingViewsModel.objects.filter(listing = listing.pk).aggregate(total_count = Sum("count"))
+            total_ratings = RatingModel.objects.filter(listing = listing.pk)
+            avg_rating =total_ratings.aggregate(avg_rating = Avg("rating"))
+            total_comments = len(ListingViewsModel.objects.filter(listing = listing.pk).values())
 
-                all_cat_lists.append(listi)
+            listi = model_to_dict(listing)
+            the_image = ImageModel.objects.filter(listing = listing.pk).values()[0] if ImageModel.objects.filter(listing = listing.pk).exists() else ''
+            listi.update({
+                "category_id" : { "id" : listing.category.pk, "name" : listing.category.name},
+                "image" : the_image,
+                "amenities" : list(ListingAmenityModel.objects.filter(listing = listing.pk).values()),
+                "cities" : list(CityListingModel.objects.filter(listing = listing.pk).values()),
+                "enquiries" : list(EnquiryModel.objects.filter(listing = listing.pk).values()),
+                "offers" : list(OfferModel.objects.filter(listing = listing.pk).values()),
+                "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
+                "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
+                "total_ratings" : len(total_ratings),
+                "total_comments" : 0 if total_comments is None else total_comments
                 
-            all_data.update({category["name"] : all_cat_lists})
+            })
 
-        return Response({"message" : "success", "data" : {
-            "categories" : list(categories),
-            "listings" : all_data,
-            "cities" : CityModel.objects.all().values_list("id", "name")
-        }})
-    except Exception as e:
-        print(e)
+            all_cat_lists.append(listi)
+            
+        all_data.update({category["name"] : all_cat_lists})
 
-@api_view(['POST'])
-def new_filter(request):
-    data = request.data
+    return Response({"message" : "success", "data" : {
+        "categories" : list(categories),
+        "listings" : all_data
+    }})
 
-    all_listings = ListingModel.objects.all()
 
-    if(len(data.get("cities")) != 0):
-        # all_city_listings = CityListingModel.objects.filter(city__in = data.get("cities")).values_list("listing", flat=True)
-        all_listings = all_listings.filter(citylistingmodel__city__in = data.get("cities"))
-        available_listings = ListingModel.objects.filter(availability = 1)
 
-        all_listings = all_listings | available_listings
+# =====================================================================================Models=================================================================
+from django.db import models
+from django.contrib.auth.models import AbstractBaseUser
+from django.utils.translation import gettext_lazy as _
+from django.contrib.auth.base_user import BaseUserManager
+
+
+class CustomUserManager(BaseUserManager):
+    def create_user(self, name, email, password, **extra_fields):
+        if not email:
+            raise ValueError(_("User must have a valid Email address"))
+        email = self.normalize_email(email)
+        user = self.model(email=email, name=name, **extra_fields)
+        user.set_password(password)
+        user.save()
+        return user
     
-    if(len(data.get("categories")) != 0):
-        all_listings = all_listings.filter(category__in = data.get("categories"))
+    def create_superuser(self, name, email, password, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('is_active', True)
+        extra_fields.setdefault('is_merchant', True)
+
+
+
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError(_('Superuser must have is_staff=True.'))
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError(_('Superuser must have is_superuser=True.'))
+        return self.create_user(name, email, password, **extra_fields)
+
+class UserModel(AbstractBaseUser):  
+    name = models.CharField(max_length=100)
+    email = models.EmailField(unique=True)
+    photo = models.ImageField(upload_to='profile')
+    phone = models.CharField(max_length=100) #"qikdial/uploads/"
+    city = models.CharField(max_length=100)
+    is_merchant = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    is_staff = models.BooleanField(default=False)
+    is_superuser = models.BooleanField(default=False)
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = ["name"]
+
+    objects = CustomUserManager()
+
+    def __str__(self):
+        return self.name
     
-    if(len(data.get("listingTypes")) != 0):
-        all_listings = all_listings.filter(listing_type__in = data.get("listingTypes"))
+    def has_perm(self, perm, obj=None):
+        return True
+
+    def has_module_perms(self, app_label):
+        return True
+
+
+class TokenModel(models.Model):
+    user = models.ForeignKey(UserModel,on_delete=models.CASCADE, unique=True)
+    token = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return self.user.name
+
+class CategoryModel(models.Model):
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True)
+    name = models.CharField(max_length=100)
+    parent_name = models.CharField(max_length=100, blank=True, null=True)
+    image = models.ImageField(upload_to='categories', null=True) #"qikdial/uploads/"
+    status = models.IntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return self.name
+
+class ListingModel(models.Model):
+    category = models.ForeignKey(CategoryModel, on_delete=models.CASCADE)
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, null=True, blank=True)
+    name = models.CharField(max_length=100)
+    company_name = models.CharField(max_length=100)
+    listing_type = models.IntegerField(default=1) #1,2,3 = product,service,business
+    availability = models.IntegerField(default=1) #1,2,3 = all over india, Specific City, Local only
+    summary = models.TextField()
+    established_on = models.CharField(max_length=100, null=True)
+    description = models.TextField()
+    timings = models.TextField(null=True, blank=True)
+    address = models.TextField(null=True)
+    map_address = models.TextField(null=True, blank=True)
+    mobile = models.CharField(max_length=100,null=True)
+    website = models.CharField(max_length=255, null=True, blank=True)
+    gstin = models.CharField(max_length=100, null=True, blank=True)
+    price = models.CharField(max_length = 100, null=True, blank=True)
+
+    height = models.CharField(max_length=100,blank=True, null=True)
+    width = models.CharField(max_length=100,blank=True, null=True)
+    weight = models.CharField(max_length=100,blank=True, null=True)
+    color = models.CharField(max_length=100,blank=True, null=True)
+    delivery_duration = models.CharField(max_length=100 ,blank=True, null=True)
+    refund = models.TextField(blank=True, null=True)
+    mode_of_service  = models.CharField(max_length=100,default="1",blank=True, null=True)
+    verified = models.IntegerField(default=0)
+    status = models.IntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return self.name
+
+class ImageModel(models.Model):
+    listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
+    image = models.ImageField(upload_to='listings') #"qikdial/uploads/"
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __int__(self) -> int:
+        return self.pk
+
+class AmenityModel(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    image = models.ImageField(upload_to="amenities") #"qikdial/uploads/"
+    status = models.IntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)   
+
+    def __str__(self) -> str:
+        return self.name
+
+class ListingAmenityModel(models.Model):
+    listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
+    amenity = models.ForeignKey(AmenityModel,on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __int__(self) -> int:
+        return self.listing.name
+
+class OfferModel(models.Model):
+    listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
+    offer = models.FloatField()
+    description = models.TextField()
+    status = models.IntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return self.description
+
+class RatingModel(models.Model):
+    listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, blank=True, null=True)
+
+    rating = models.IntegerField()
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __int__(self) -> int:
+        return self.rating
+
+class FavoriteModel(models.Model):
+    listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __int__(self) -> int:
+        return self.pk
+
+class ListingViewsModel(models.Model):
+    listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, null=True, blank=True)
+    count = models.IntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __int__(self) -> int:
+        return self.pk
+
+class EnquiryModel(models.Model):
+    listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __int__(self) -> int:
+        return self.pk
+ 
+class BlogModel(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.CharField(max_length=100)
+    summary = models.TextField(default=None)
+    description = models.TextField()
+    image = models.ImageField(upload_to="blogs") #"qikdial/uploads/"
+    views = models.IntegerField(default=0)  
+    status = models.IntegerField(default=1)   
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return self.title
+
+class CommentModel(models.Model):
+    blog = models.ForeignKey(BlogModel, on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)
+    email = models.EmailField()
+    number = models.CharField(max_length=100)
+    subject = models.CharField(max_length=255)
+    comment = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return self.subject
+
+class ContactsModel(models.Model):
+    name = models.CharField(max_length=100)
+    email = models.CharField(max_length=100)   
+    mobile = models.CharField(max_length=100)   
+    subject = models.CharField(max_length=255)   
+    message = models.TextField()   
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class CityModel(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    status = models.IntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return self.name
     
-    if(int(data.get('mos')) != -1):
-        all_listings = all_listings.filter(mode_of_service = int(data.get('mos')))
+class CityListingModel(models.Model):
+    listing = models.ForeignKey(ListingModel, on_delete=models.CASCADE)
+    city = models.ForeignKey(CityModel, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return self.city.name
     
-    if(data.get("text") != ''):
-        all_listings = all_listings.filter(name__icontains = data.get("text"))
+# ==========================================================================================urls=======================================
+from django.urls import path
+# from django.contrib.auth.views import LoginView, LogoutView
+from .views import *
 
-    if(data.get("sort_order") != '0'):
-        if(data.get("sort_order") == 'latest'):
-            all_listings = all_listings.order_by('-created_at')
-        if(data.get("sort_order") == 'verified'):
-            all_listings = all_listings.order_by('-verified')
+urlpatterns = [
+# ==========================================================Basics==========================================================
+
+    path("test", Tester),
+    path("login", Loginer),
+    path("logout",Logouter),
+    path("signup",Signup),
+    path("checker", token_checker),
+
+# ==========================================================Amenities==========================================================
+
+    path("amenity/",AmenitiesView.as_view()),
+    path("amenity/edit/name",AminityNameEdit),
+    path("amenity/edit/image",AminityImageEdit),
+    path("amenity/get",AminityGet),
+
+# ==========================================================Categories==========================================================
+
+    path("category/",CategoryView.as_view()),
+    path("category/edit/image",CategoryImageEdit),
+    path("category/get",CategoryGet),
+
+# ==========================================================Cities==========================================================
+
+    path("city/",CityView.as_view()),
+    path("city/get",CityGet),
+
+# ==========================================================Listings==========================================================
+
+    path("listings/",ListingView.as_view()),
+    path("listings/get/",ListingGetSpecific),
+    path("listings/userget",ListingGetUserSpecific),
+    path("listings/delete",ListingHardDelete),
+
+    path("listings/edit/basicinfo",BasicInfoEditor),
+    path("listings/edit/otherinfo",OtherInfoEditor),
+    path("listings/edit/amenities",AmenityInfoEditor),
+    path("listings/edit/cities",CityInfoEditor),
+    path("listings/image/",ListingImageView.as_view()),
 
 
-    listings = []
-        
-    for listing in all_listings:
 
-        total_views = ListingViewsModel.objects.filter(listing = listing.pk).aggregate(total_count = Sum("count"))
-        total_ratings = RatingModel.objects.filter(listing = listing.pk)
-        avg_rating =total_ratings.aggregate(avg_rating = Avg("rating"))
-        total_comments = len(ListingViewsModel.objects.filter(listing = listing.pk).values())
 
-        listi = model_to_dict(listing)
-        the_image = ImageModel.objects.filter(listing = listing.pk).values()[0] if ImageModel.objects.filter(listing = listing.pk).exists() else ''
-        listi.update({
-            "category_id" : { "id" : listing.category.pk, "name" : listing.category.name},
-            "image" : the_image,
-            "amenities" : list(ListingAmenityModel.objects.filter(listing = listing.pk).values_list("amenity__id", "amenity__name")),
-            "cities" : list(CityListingModel.objects.filter(listing = listing.pk).values_list("city__id", "city__name")),
-            "enquiries" : list(EnquiryModel.objects.filter(listing = listing.pk).values()),
-            "offers" : list(OfferModel.objects.filter(listing = listing.pk).values()),
-            "views" : 0 if total_views["total_count"] is None else total_views["total_count"],
-            "avg_rating" : 0 if avg_rating["avg_rating"] is None else avg_rating["avg_rating"],
-            "total_ratings" : len(total_ratings),
-            "total_comments" : 0 if total_comments is None else total_comments   
-        })
+# ==========================================================Ratings and Listings views==========================================================
 
-        listings.append(listi)
+    path("rating/",RatingView.as_view()), 
+    path("rating/get",RatingsUserSpecific),
+    path("views",ListingViewsView.as_view()),
 
-    if(data.get("sort_order") != '0'):
-        if(data.get("sort_order") == 'popular'):
-            listings = sorted(listings, key=lambda x : x['views'])
-        if(data.get("sort_order") == 'high'):
-            listings = sorted(listings, key=lambda x : x['avg_rating'], reverse=True)
-        if(data.get("sort_order") == 'low'):
-            listings = sorted(listings, key=lambda x : x['avg_rating'])
+# ==========================================================Favorites==========================================================
+
+    path("favorites/",FavoritesView.as_view()),
+    path("favorites/get/",GetFavorites),
+
+# ==========================================================Blogs and comments==========================================================
+
+    path("blogs/",BlogView.as_view()),
+    path("blogs/getspecific/",GetSpecificBlog),
+    path("blogs/populars",GetPopularBlogs),
+
+    path("blogs/comments/",BlogCommentsView.as_view()),
+
+
+# ==========================================================Offers, Enquiry, Contacts==========================================================
+
+    path("offers/",OffersView.as_view()),
+    path("enquiry/",EnquiryView.as_view()),
+    path("enquries",GetUserEnquries),
+    path("contacts",ContactsView.as_view()),
+
+# ==========================================================Users==========================================================
+    
+    path("useredit/",UserView.as_view()),
+    path("useredit/image",EditProfilePhoto),
+    path("useredit/pwd",PwdChanger),
+    path("adminpage/getusers",GetTheUsers),
+
+
+# ==========================================================Dashboard and Filter==========================================================
+
+    path("dashboard", Dashboard.as_view()),
+    path("filter",Filter.as_view()),
+    path("homepage", homepage)
 
     
-    return Response({"message" : "success", "data" : listings})
+]
+
+#serial===========================================================================================================================
+from rest_framework import serializers
+from .models import *
+
+# class UserSerialiser
+
+# ============================================================Amenities============================================================
+class AmenityPostSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = AmenityModel
+        fields = ["name","image"]
+
+class AmenityImagePutSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = AmenityModel
+        fields = ["image"]
+
+class AmenityGetSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = AmenityModel
+        fields = '__all__'
+
+# ============================================================Categories============================================================
+class CategoryPostSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = CategoryModel
+        fields = ["parent","name","image","parent_name"]
+
+class CategoryPutSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = CategoryModel
+        fields = ["parent","name","parent_name"]
+
+class CategoryPutImageSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = CategoryModel
+        fields = ["image"]
+
+class CategoryGetSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = CategoryModel
+        fields = '__all__'
+
+# ============================================================Cities============================================================
+class CityPostSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = CityModel
+        fields = ["name"]
+
+class CityGetSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = CityModel
+        fields = '__all__'
+
+# ============================================================Listings============================================================
+class ListingGetSerializer(serializers.ModelSerializer):
+    category = CategoryGetSerializer()
+    class Meta :
+        model = ListingModel
+        fields = '__all__'
+
+class ListingProductPostSerializer(serializers.ModelSerializer):
+    class Meta :
+        model = ListingModel
+        fields = ["category", "user", "name", "company_name", "listing_type", "availability", "summary", "established_on", "description","address", "map_address", "mobile", "price", "gstin", "height", "width", "weight", "color", "delivery_duration", "refund"]
+
+        # fields = ["category", "user", "name", "company_name", "listing_type", "availability", "summary", "established_on", "description", "timings", "address", "map_address", "mobile", "website", "gstin", "price"]
+
+class ListingServicePostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListingModel
+        fields = ["category", "user", "name", "company_name", "listing_type", "availability", "summary", "established_on", "description", "address", "map_address", "mobile", "website", "timings", "mode_of_service", "delivery_duration", "refund"]
+
+class ListingBusinessPostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListingModel
+        fields = ["category", "user", "name", "company_name", "listing_type", "availability", "summary", "established_on", "description","address", "map_address", "mobile", "website", "timings", "gstin"]
+# category, user, name, company_name, listing_type, availability, summary, established_on, description, timings, address, mobile, website, gstin, price, verified
+
+# ============================================================Listing Image============================================================
+
+class ListingImagePostSerialiser(serializers.ModelSerializer):
+    class Meta:
+        model = ImageModel
+        fields = ["listing", "image"]
+
+# ============================================================City Listing============================================================
+
+class CityListingPostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CityListingModel
+        fields = ["listing", "city"]
+
+# ============================================================Rating============================================================
+
+class RatingPostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RatingModel
+        fields = ["listing", "user", "rating", "description"]
+
+# ============================================================Blogs, BlogComments============================================================
+
+class BlogGetSerializer(serializers.Serializer):
+    class Meta:
+        model = BlogModel
+        fields = "__all__"
+
+class BlogPostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BlogModel
+        fields = ["title", "author", "description", "image", "summary"]
+
+class BlogCommentPostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CommentModel
+        fields = ["blog", "name", "email", "number", "subject", "comment"]
+
+# ============================================================Offers============================================================
+
+class OfferSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OfferModel
+        fields = ["listing", "offer", "description"]
+
+class OfferGetSerializer(serializers.ModelSerializer):
+    listing_id = ListingGetSerializer()
+    class Meta:
+        model = OfferModel
+        fields = "__all__"
+# ============================================================Enquiry============================================================
+
+class EnquirySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EnquiryModel
+        fields = ["listing", "user"]
+
+# ============================================================Contact us============================================================
+
+class ContactsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactsModel
+        fields = ["name", "email", "mobile", "subject", "message"]
+
+# ============================================================Users============================================================
+
+class UserEditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserModel
+        fields = ["name", "email", "phone", "city"]
+
+class UserImageEditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserModel
+        fields = ["photo"]
+
+# ============================================================Listing Edits============================================================
+
+class BasicInfoSerialiser(serializers.ModelSerializer):
+    class Meta:
+        model = ListingModel
+        fields = ["name", "company_name", "listing_type", "category", "availability", "established_on", "address", "map_address", "mobile", "summary", "description"]
+
+class OtherInfoSerialiser(serializers.ModelSerializer):
+    class Meta:
+        model = ListingModel
+        fields = ["price", "gstin", "height", "width", "weight", "color", "delivery_duration", "refund", "mode_of_service", "website", "timings",]
+
+#admin============================================================================================================================
+
+from django.contrib import admin
+from .models import *
+
+# Register your models here.
+admin.site.register(CategoryModel)
+admin.site.register(ListingModel)
+admin.site.register(ImageModel)
+admin.site.register(AmenityModel)
+admin.site.register(ListingAmenityModel)
+admin.site.register(OfferModel)
+admin.site.register(RatingModel)
+admin.site.register(FavoriteModel)
+admin.site.register(ListingViewsModel)
+admin.site.register(EnquiryModel)
+admin.site.register(UserModel)
+admin.site.register(TokenModel)
+admin.site.register(BlogModel)
+admin.site.register(CommentModel)
+admin.site.register(CityModel)
+admin.site.register(CityListingModel)
+admin.site.register(ContactsModel)
